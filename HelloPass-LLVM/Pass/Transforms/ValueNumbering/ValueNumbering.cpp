@@ -10,151 +10,112 @@ using namespace std;
 using namespace llvm;
 
 namespace {
-    // This method implements what the pass does
-    void visitor(Function &F){
-
-        // Here goes what you want to do with a pass
-
-        string func_name = "main";
-        errs() << "ValueNumbering: " << F.getName() << "\n";
-
-        // Comment this line
-        // if (F.getName() != func_name) return;
-
-        for (auto& basic_block : F)
-        {
-            for (auto& inst : basic_block)
-            {
-                errs() << inst << "\n";
-                if(inst.getOpcode() == Instruction::Load){
-                    errs() << "This is Load"<<"\n";
-                }
-                if(inst.getOpcode() == Instruction::Store){
-                    errs() << "This is Store"<<"\n";
-                }
-                if (inst.isBinaryOp())
-                {
-                    errs() << "Op Code:" << inst.getOpcodeName()<<"\n";
-                    if(inst.getOpcode() == Instruction::Add){
-                        errs() << "This is Addition"<<"\n";
-                    }
-                    if(inst.getOpcode() == Instruction::Load){
-                        errs() << "This is Load"<<"\n";
-                    }
-                    if(inst.getOpcode() == Instruction::Mul){
-                        errs() << "This is Multiplication"<<"\n";
-                    }
-
-                    // see other classes, Instruction::Sub, Instruction::UDiv, Instruction::SDiv
-                    // errs() << "Operand(0)" << (*inst.getOperand(0))<<"\n";
-                    auto* ptr = dyn_cast<User>(&inst);
-                    //errs() << "\t" << *ptr << "\n";
-                    for (auto it = ptr->op_begin(); it != ptr->op_end(); ++it) {
-                        errs() << "\t" <<  *(*it) << "\n";
-                        // if ((*it)->hasName()) 
-                        // errs() << (*it)->getName() << "\n";                      
-                    }
-                } // end if
-            } // end for inst
-        } // end for block
-    }
-
     void LVN(Function &F){
         errs() << "Function name: " << F.getName() << '\n';
 
         int ID = 1;
-        std::map<llvm::Value*, int> hash;
-        std::map<llvm::Value*, int>::iterator it, it1;
-        std::map<std::string, int> op_hash;
-        std::map<std::string, int>::iterator op_it;
+        std::map<std::string, int> hash;
+        std::map<std::string, int>::iterator it, it1;
 
         for(auto& basic_block : F){
 
             for(auto& inst : basic_block){
+                // STORE instruction
                 if(inst.getOpcode() == Instruction::Store){
-                    errs() << "Store: " << '\n';
-                    errs() << '\t' << inst;
+                    //errs() << "Store: " << '\n';
+                    //errs() << '\t' << inst;
+
+                    std::string l = formatv("{0}", inst.getOperand(0));
+                    std::string r = formatv("{0}", inst.getOperand(1));
 
                     // Search for the value numbers of the left and right operands
-                    it = hash.find(inst.getOperand(0));
-                    it1 = hash.find(inst.getOperand(1));
+                    it = hash.find(l);
+                    it1 = hash.find(r);
 
                     // If the left operand is not found, insert both operands into the hash table with the same ID
                     if(it == hash.end()){
-                        hash[inst.getOperand(0)] = ID;
-                        hash[inst.getOperand(1)] = ID;
-                        errs() << "\t" << hash[inst.getOperand(0)] << " = " << hash[inst.getOperand(1)] << '\n'; 
+                        hash[l] = ID;
+                        hash[r] = ID;
+                        errs() << formatv("{0, -40} {1} = {2}\n", inst, hash[l], hash[r]);
                         ID++;
                     }
                     // If the left operand is found, then map the right value to the left value
                     else{
-                        hash[inst.getOperand(1)] = hash[inst.getOperand(0)];
-                        errs() << "\t" << hash[inst.getOperand(0)] << " = " << hash[inst.getOperand(1)] << '\n'; 
+                        hash[r] = hash[l];
+                        errs() << formatv("{0, -40} {1} = {2}\n", inst, hash[l], hash[r]);
                     }
-                    errs() << "\tOperand(0):" << *(inst.getOperand(0)) << '\n';
-                    errs() << "\tOperand(1):" << *(inst.getOperand(1)) << '\n';
+                    //errs() << "\tInstruction:" << &inst << '\n';
+                    //errs() << "\tOperand(0):" << l << '\n';
+                    //errs() << "\tOperand(1):" << r << '\n';
                 }
 
                 if(inst.getOpcode() == Instruction::Load){
-                    errs() << "Load: " << '\n';
-                    errs() << '\t' << inst;
+                    //errs() << "Load: " << '\n';
+                    //errs() << '\t' << inst;
 
-                    it = hash.find(inst.getOperand(0));
+                    std::string op = formatv("{0}", inst.getOperand(0));
+                    it = hash.find(op);
 
                     if(it == hash.end()){
-                        hash[inst.getOperand(0)] = ID;
-                        errs() << "\t" << hash[inst.getOperand(0)] << " = " << hash[inst.getOperand(0)] << '\n'; 
+                        hash[op] = ID;
+                        errs() << formatv("{0,-40} {1} = {2}\n", inst, hash[op], hash[op]); 
                         ID++;
                     }
                     else{
-                        errs() << "\t" << hash[inst.getOperand(0)] << " = " << hash[inst.getOperand(0)] << '\n'; 
+                        errs() << formatv("{0,-40} {1} = {2}\n", inst, hash[op], hash[op]); 
                     }
-                    errs() << "\tOperand(0):" << *(inst.getOperand(0)) << '\n';
+                    //errs() << "\tOperand(0):" << op << '\n';
                 }
 
                 if(inst.isBinaryOp()){
                     if(inst.getOpcode() == Instruction::Add){
-                        errs() << "Add: " << '\n';
-                        errs() << '\t' << inst;
+                        //errs() << "Add: " << '\n';
+                        //errs() << '\t' << inst;
 
-                        auto l = dyn_cast<User>(inst.getOperand(0));
-                        auto r = dyn_cast<User>(inst.getOperand(1));
+                        auto op0 = dyn_cast<User>(inst.getOperand(0));
+                        auto op1 = dyn_cast<User>(inst.getOperand(1));
+
+                        std::string l = formatv("{0}", op0->getOperand(0));
+                        std::string r = formatv("{0}", op1->getOperand(0));
 
                         // Search for the value numbers of the left and right operands
-                        it =  hash.find(l->getOperand(0));
-                        it1 = hash.find(r->getOperand(0));
+                        it =  hash.find(l);
+                        it1 = hash.find(r);
 
                         // If not found, create new entries in the hash table
                         if(it == hash.end()){
-                            hash[l->getOperand(0)] = ID;
+                            hash[l] = ID;
                             ID++;
                         }
 
                         if(it1 == hash.end()){
-                            hash[r->getOperand(0)] = ID;
+                            hash[r] = ID;
                             ID++;
                         }
 
-                        std::string s;
-                        s = llvm::formatv("{0} {1} {2}", hash[l->getOperand(0)], '+', hash[r->getOperand(0)]);
+                        std::string s, instr;
+                        s = llvm::formatv("{0} {1} {2}", hash[l], "add", hash[r]);
+                        instr = formatv("{0}", &inst);
 
                         // Search the op hash table for V(l) op V(r)
-                        op_it = op_hash.find(s);
+                        it = hash.find(s);
 
                         // It not found, create a new entry in the hash table
-                        if(op_it == op_hash.end()){
-                            hash[&inst] = ID;
-                            op_hash[s] = ID;
-                            errs() << "\t\t" <<  op_hash[s] << " = " << hash[l->getOperand(0)] << " + " << hash[r->getOperand(0)] << '\n';
+                        if(it == hash.end()){
+                            hash[s] = ID;
+                            hash[instr] = ID;
+                            errs() << formatv("{0, -40} {1} = {2}\n", inst, hash[s], s);
                             ID++;
 
                         }
                         else{
-                            errs() << "\t\t" <<  op_hash[s] << " = " << hash[l->getOperand(0)] << " + " << hash[r->getOperand(0)] << '\n';
+                            hash[instr] = hash[s];
+                            errs() << formatv("{0, -40} {1} {4} {2} {3}\n", inst, hash[s], s, "(redundant)", '=');
                         }
 
-                        errs() << "\tOperand(0):" << *(l->getOperand(0)) << '\n';
-                        errs() << "\tOperand(1):" << *(r->getOperand(0)) << '\n';
+                        //errs() << "\tInstruction:" << &inst << '\n';
+                        //errs() << "\tOperand(0):" << l << '\n';
+                        //errs() << "\tOperand(1):" << r << '\n';
                     }
 
                     if(inst.getOpcode() == Instruction::Sub)
