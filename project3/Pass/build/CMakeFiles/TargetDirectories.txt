@@ -1,0 +1,6 @@
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/intrinsics_gen.dir
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/omp_gen.dir
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/acc_gen.dir
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/LLVMValueNumberingPass.dir
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/edit_cache.dir
+/Users/Celvin/cs201/HelloPass-LLVM/Pass/build/CMakeFiles/rebuild_cache.dir
