@@ -1,9 +1,12 @@
-int test(int a, int b)
-{
-  int c = a + b;
-  int d = b + c;
-  int e = a + b;
-  int f = b + e;
-  
-  return f;
+void test() {
+    int a, b, c, e;
+    e = b + c;
+    if (e > 0) {
+        e = a; 
+    }
+
+    else {
+        a = b + c;
+    }
+    a = e + c; 
 }
