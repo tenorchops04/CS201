@@ -4,6 +4,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/IR/BasicBlock.h"
 #include<map>
 #include<set>
 
@@ -12,9 +13,18 @@ using namespace llvm;
 
 namespace {
     void LivenessAnalysisPass(Function &F){
-        set<string> UEVars, VarKilled;
+        map<string, set<string>> m_UE;
+        map<string, set<string>> m_VK;
+        map<string, set<string>> m_LO;
+
+        // Computes the upward exposed variables and killed variables for each basic block
         for(auto& basic_block: F){
+            string block = formatv("{0}", &basic_block);
+            errs() << "Block: " << block << '\n';
+            set<string> UEVars, VarKilled;
+
             for(auto& inst: basic_block){
+                string instr = formatv("{0}", &inst);
 // --------------- STORE instruction
                 if(inst.getOpcode() == Instruction::Store){
                     std::string l;
@@ -28,37 +38,63 @@ namespace {
 
                     // The right operand will always be the address were the left operand is stored
                     r = formatv("{0}", inst.getOperand(1));
+
+                    VarKilled.insert(r);
+                    errs() << "\tVar killed: " << r << '\n';
                 }
 //---------------- Binary operations (+, -, *, /)
-                    if(inst.isBinaryOp()){
-                        auto op0 = dyn_cast<User>(inst.getOperand(0));
-                        auto op1 = dyn_cast<User>(inst.getOperand(1));
+                if(inst.isBinaryOp()){
+                    errs() << "\tBinary op\n";
+                    auto op0 = dyn_cast<User>(inst.getOperand(0));
+                    auto op1 = dyn_cast<User>(inst.getOperand(1));
 
-                        std::string l;
-                        std::string r;
+                    std::string l;
+                    std::string r;
 
-                        // Must check if either of the operands are constants
-                        if(ConstantInt* CI0 = dyn_cast<ConstantInt>(op0))
-                            l = formatv("{0}", CI0->getSExtValue());
-                        else
-                            l = formatv("{0}", op0->getOperand(0));
+                    // Must check if either of the operands are constants
+                    if(ConstantInt* CI0 = dyn_cast<ConstantInt>(op0))
+                        l = formatv("{0}", CI0->getSExtValue());
+                    else
+                        l = formatv("{0}", op0->getOperand(0));
 
-                        if(ConstantInt* CI1 = dyn_cast<ConstantInt>(op1))
-                            r = formatv("{0}", CI1->getSExtValue());
-                        else
-                            r = formatv("{0}", op1->getOperand(0));
+                    if(ConstantInt* CI1 = dyn_cast<ConstantInt>(op1))
+                        r = formatv("{0}", CI1->getSExtValue());
+                    else
+                        r = formatv("{0}", op1->getOperand(0));
 
-                        if(VarKilled.find(l) != VarKilled.end()){
-                            UEVars.insert(l);
-                        }
-                        if(VarKilled.find(r) != VarKilled.end()){
-                            UEVars.insert(r);
-                        }
+                    // Determine the variables the upwards exposed variables
+                    if(VarKilled.find(l) == VarKilled.end()){
+                        UEVars.insert(l);
+                        errs() << "\tUEVars: " << l << '\n';
+                    }
+                    if(VarKilled.find(r) == VarKilled.end()){
+                        UEVars.insert(r);
+                        errs() << "\tUEVars: " << r << '\n';
+                    }
+                }
+                m_UE[block] = UEVars;
+                m_VK[block] = VarKilled;
 
-                        // Need var for assignment var
+            }
+        }
+
+        bool cont = true;
+
+        while(cont){
+            cont = false;
+            for(auto& basic_block: reverse(F)){
+                string block = formatv("{0}", &basic_block);
+                set<string> temp;
+                for (BasicBlock *Succ : successors(&basic_block)) {
+                    string succ = formatv("{0}", Succ);
+
+                    std::set_difference(m_LO[succ].begin(), m_LO[succ].end(), m_VK[succ].begin(), m_VK[succ].end(), temp);
+                    std::set_union(temp.begin(), temp.end(), m_UE[succ].begin(), m_UE[succ].end(), temp);
+
                 }
             }
         }
+
     }
 
     // New PM implementation
