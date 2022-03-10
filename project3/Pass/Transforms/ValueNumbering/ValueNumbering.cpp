@@ -13,6 +13,10 @@ using namespace llvm;
 
 namespace {
     void LivenessAnalysisPass(Function &F){
+        bool isFromBin = false;
+        bool already_UE_l = false;
+        bool already_UE_r = false;
+        bool first_load = true;
         map<string, set<string>> m_UE;
         map<string, set<string>> m_VK;
         map<string, set<llvm::Value*>> m_UE_val;
@@ -27,10 +31,13 @@ namespace {
 
             for(auto& inst: basic_block){
                 string instr = formatv("{0}", &inst);
+
 // --------------- STORE instruction
                 if(inst.getOpcode() == Instruction::Store){
                     std::string l;
                     std::string r;
+                    llvm::Value* l1 = inst.getOperand(0);
+                    llvm::Value* r1 = inst.getOperand(1);
 
                     // Need to check if the left operand is a constant number
                     if(ConstantInt* CI = dyn_cast<ConstantInt>(inst.getOperand(0)))
@@ -41,13 +48,48 @@ namespace {
                     // The right operand will always be the address were the left operand is stored
                     r = formatv("{0}", inst.getOperand(1));
 
+                    if(isFromBin){
+                        errs() << "\t  Is from binary inst: " << inst.getOperand(0)->getName() << '\n';
+                        isFromBin = false;
+                    }
+                    else{
+                        errs() << "\t  Is not from binary instr: " << inst.getOperand(0)->getName() << '\n';
+                        UEVars.insert(l);
+                        UEVars_val.insert(l1);
+
+                    }
+                    //if(UEVars.find(r) != UEVars.end()) {
+                      //  UEVars.erase(r);
+                       // UEVars_val.erase(r1);
+                    //}
+
                     VarKilled.insert(r);
-                    VarKilled_val.insert(inst.getOperand(1));
-                    errs() << "\tVar killed: " << r << '\n';
+                    VarKilled_val.insert(r1);
+                    errs() << "\t  Var killed: " << r1->getName() << '\n';
                 }
+//---------------- LOAD instruction
+                if(inst.getOpcode() == Instruction::Load){
+                    std::string instr = formatv("{0}", &inst);
+                    std::string op = formatv("{0}", inst.getOperand(0));
+
+                    if (UEVars.find(op) != UEVars.end() && first_load){
+                        already_UE_l = true;
+                        first_load = false;
+                    }
+                    if (UEVars.find(op) != UEVars.end() && !first_load){
+                        already_UE_r = true;
+                        first_load = true;
+                    }
+
+                    if (VarKilled.find(op) == VarKilled.end()) {
+                        UEVars.insert(op);
+                        UEVars_val.insert(inst.getOperand(0));
+                    }
+                }
+
 //---------------- Binary operations (+, -, *, /)
                 if(inst.isBinaryOp()){
-                    errs() << "\tBinary op\n";
+                    errs() << "\tBinary op: " << inst << '\n';
                     auto op0 = dyn_cast<User>(inst.getOperand(0));
                     auto op1 = dyn_cast<User>(inst.getOperand(1));
 
@@ -77,26 +119,32 @@ namespace {
                     if(VarKilled.find(l) == VarKilled.end()){
                         UEVars.insert(l);
                         UEVars_val.insert(l1);
-                        errs() << "\tUEVars: " << l << '\n';
+                        errs() << "\t  UEVars: " << l1->getName() << '\n';
                     }
                     if(VarKilled.find(r) == VarKilled.end()){
                         UEVars.insert(r);
                         UEVars_val.insert(r1);
-                        errs() << "\tUEVars: " << r << '\n';
+                        errs() << "\t  UEVars: " << r1->getName() << '\n';
                     }
+                    isFromBin = true;
+
+
                 }
+
                 m_UE[block] = UEVars;
                 m_VK[block] = VarKilled;
                 m_UE_val[block] = UEVars_val;
                 m_VK_val[block] = VarKilled_val;
 
             }
+            already_UE_l = false;
+            already_UE_r = false;
         }
 
         bool cont = true;
         map<string, set<string>> m_LO;
         map<string, set<llvm::Value*>> m_LO_val;
-        errs() << "Bottom up\n\n";
+        errs() << "-------------Bottom up---------------\n\n";
 
         while(cont){
             errs() << "iteration\n";
@@ -104,102 +152,85 @@ namespace {
 
             for(auto& basic_block: reverse(F)){
                 string block = formatv("{0}", &basic_block);
-                vector<string> prev_LO;
-                vector<llvm::Value*> prev_LO_val;
+                set<string> prev_LO;
+                set<llvm::Value*> prev_LO_val;
                 errs() << "\tblock: " << block << "\n";
 
                 map<string, set<string>>::iterator f = m_LO.find(block);
                 map<string, set<llvm::Value*>>::iterator f1 = m_LO_val.find(block);
 
                 if(f != m_LO.end()){
-                    errs() << "Found block in m_LO\n";
-                    copy(m_LO[block].begin(),m_LO[block].end(),std::back_inserter(prev_LO));
+                    copy(m_LO[block].begin(),m_LO[block].end(),std::inserter(prev_LO, prev_LO.end()));
                 }
                 if(f1 != m_LO_val.end()){
-                    errs() << "Found block in m_LO\n";
-                    copy(m_LO_val[block].begin(),m_LO_val[block].end(),std::back_inserter(prev_LO_val));
+                    copy(m_LO_val[block].begin(),m_LO_val[block].end(),std::inserter(prev_LO_val, prev_LO_val.end()));
                 }
 
-                errs() << "\tm_LO[block]\n";
-                vector<string> new_lo;
-                vector<llvm::Value*> new_lo_val;
+                set<string> new_lo;
+                set<llvm::Value*> new_lo_val;
 
                 for (BasicBlock *Succ : successors(&basic_block)) {
-                    vector<string> temp;
-                    vector<llvm::Value*> temp2;
+                    set<string> temp;
+                    set<llvm::Value*> temp2;
                     string succ = formatv("{0}", Succ);
-                    errs() << "\tsuccessor: " << succ << '\n';
                     set<string> s1 =m_LO[succ];
                     set<string> s2 =m_VK[succ];
                     set<llvm::Value*> s3 =m_LO_val[succ];
                     set<llvm::Value*> s4 =m_VK_val[succ];
 
-                    std::set_difference(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(temp));
-                    std::set_union(temp.begin(), temp.end(), m_UE[succ].begin(), m_UE[succ].end(), std::back_inserter(temp));
+                    std::set_difference(s1.begin(), s1.end(), s2.begin(), s2.end(), std::inserter(temp, temp.end()));
+                    std::set_union(temp.begin(), temp.end(), m_UE[succ].begin(), m_UE[succ].end(), std::inserter(temp, temp.end()));
 
-                    std::set_union(temp.begin(), temp.end(), new_lo.begin(), new_lo.end(), std::back_inserter(new_lo));
+                    std::set_union(temp.begin(), temp.end(), new_lo.begin(), new_lo.end(), std::inserter(new_lo, new_lo.end()));
 
-                    std::set_difference(s3.begin(), s3.end(), s4.begin(), s4.end(), std::back_inserter(temp2));
-                    std::set_union(temp2.begin(), temp2.end(), m_UE_val[succ].begin(), m_UE_val[succ].end(), std::back_inserter(temp2));
+                    std::set_difference(s3.begin(), s3.end(), s4.begin(), s4.end(), std::inserter(temp2, temp2.end()));
+                    std::set_union(temp2.begin(), temp2.end(), m_UE_val[succ].begin(), m_UE_val[succ].end(), std::inserter(temp2, temp2.end()));
 
-                    std::set_union(temp2.begin(), temp2.end(), new_lo_val.begin(), new_lo_val.end(), std::back_inserter(new_lo_val));
+                    std::set_union(temp2.begin(), temp2.end(), new_lo_val.begin(), new_lo_val.end(), std::inserter(new_lo_val, new_lo_val.end()));
                 }
 
-                set<string> new_LO_set;
-                copy(new_lo.begin(),new_lo.end(),inserter(new_LO_set,new_LO_set.end()));
-
-                set<string> prev_LO_set;
-                copy(prev_LO.begin(),prev_LO.end(),inserter(prev_LO_set,prev_LO_set.end()));
-                set<llvm::Value*> new_LO_set_val;
-                copy(new_lo_val.begin(),new_lo_val.end(),inserter(new_LO_set_val,new_LO_set_val.end()));
-
-                set<llvm::Value*> prev_LO_set_val;
-                copy(prev_LO_val.begin(),prev_LO_val.end(),inserter(prev_LO_set_val,prev_LO_set_val.end()));
-                errs() << "new_lo: ";
-                for(auto a: new_LO_set)
-                    errs() << a << " ";
+                errs() << "\t  new_lo: ";
+                for(auto a: new_lo_val)
+                    errs() << a->getName() << " ";
                 errs() << '\n';
 
-                errs() << "prev_LO: ";
-                for(auto a: prev_LO_set)
-                    errs() << a << " ";
+                errs() << "\t  prev_LO: ";
+                for(auto a: prev_LO_val)
+                    errs() << a->getName() << " ";
                 errs() << '\n';
 
-                errs() << "Checking changed\n";
 
-                if (new_LO_set != prev_LO_set) { 
-                    errs() << "Inside if stmt\n";
-                    //set<string> new_LO_set;
-                    //copy(new_lo.begin(),new_lo.end(),inserter(new_LO_set,new_LO_set.end()));
-                    m_LO[block] = new_LO_set;
-                    m_LO_val[block] = new_LO_set_val;
+                if (new_lo != prev_LO) { 
+                    m_LO[block] = new_lo;
+                    m_LO_val[block] = new_lo_val;
                     cont = true;
-                    errs() << "continue\n";
                 }
-                errs() << "After checking\n";
 
             }
         }
+
         for(auto& basic_block: F){
             string block_name = formatv("{0}",basic_block.getName());
             errs() << "-------" << block_name << "--------\n";
             string block = formatv("{0}", &basic_block);
-            //map<string,set<string>>::iterator f = m_LO.find(block);
             set<llvm::Value*>::iterator itr;
             errs() << "UEVARS: ";
             for (auto a:m_UE_val[block]) {
-                errs() << formatv("{0}",a->getName()) << " ";
+                if(a->hasName())
+                    errs() << formatv("{0}",a->getName()) << " ";
             }
             errs() << "\n";
             errs() << "VARKILL: ";
             for (auto a:m_VK_val[block]) {
-                errs() << formatv("{0}",a->getName()) << " ";
+                if(a->hasName())
+                    errs() << formatv("{0}",a->getName()) << " ";
             }
             errs() << "\n";
             errs() << "LIVEOUT: ";
-//            for (auto a:m_LO_val[block]) {
-//                errs() << formatv("{0}",a->getName()) << " ";
-//            }
+            for (auto a:m_LO_val[block]) {
+                if(a->hasName())
+                    errs() << formatv("{0}",a->getName()) << " ";
+            }
             errs() << "\n";
 
         }
