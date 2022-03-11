@@ -22,10 +22,11 @@ namespace {
         map<string, set<llvm::Value*>> m_UE_val;
         map<string, set<llvm::Value*>> m_VK_val;
 
-        // Computes the upward exposed variables and killed variables for each basic block
+        // STEP 1: Compute the upward exposed variables and killed variables for each basic block. Traverses
+        // the CFG in a top-down manner
         for(auto& basic_block: F){
             string block = formatv("{0}", &basic_block);
-            errs() << "Block: " << block << '\n';
+
             set<string> UEVars, VarKilled;
             set<llvm::Value*> UEVars_val, VarKilled_val;
 
@@ -48,48 +49,36 @@ namespace {
                     // The right operand will always be the address were the left operand is stored
                     r = formatv("{0}", inst.getOperand(1));
 
-                    if(isFromBin){
-                        errs() << "\t  Is from binary inst: " << inst.getOperand(0)->getName() << '\n';
+                    // Need to check if the operand we are storing is coming from a binary operation. The variable
+                    // is upwards exposed only if it is not from a binary operation
+                    if(isFromBin)
                         isFromBin = false;
-                    }
                     else{
-                        errs() << "\t  Is not from binary instr: " << inst.getOperand(0)->getName() << '\n';
                         UEVars.insert(l);
                         UEVars_val.insert(l1);
 
                     }
-                    //if(UEVars.find(r) != UEVars.end()) {
-                      //  UEVars.erase(r);
-                       // UEVars_val.erase(r1);
-                    //}
 
+                    // STORE instructions act like assignments, so it's right operand is always killed
                     VarKilled.insert(r);
                     VarKilled_val.insert(r1);
-                    errs() << "\t  Var killed: " << r1->getName() << '\n';
                 }
+
 //---------------- LOAD instruction
                 if(inst.getOpcode() == Instruction::Load){
-                    std::string instr = formatv("{0}", &inst);
                     std::string op = formatv("{0}", inst.getOperand(0));
+                    llvm::Value* op0 = inst.getOperand(0);
 
-                    if (UEVars.find(op) != UEVars.end() && first_load){
-                        already_UE_l = true;
-                        first_load = false;
-                    }
-                    if (UEVars.find(op) != UEVars.end() && !first_load){
-                        already_UE_r = true;
-                        first_load = true;
-                    }
-
-                    if (VarKilled.find(op) == VarKilled.end()) {
+                    // We only care about the left operand in a load instruction. If it has not been killed, add it
+                    // to the upwards exposed variable set
+                    if (VarKilled_val.find(op0) == VarKilled_val.end()) {
                         UEVars.insert(op);
-                        UEVars_val.insert(inst.getOperand(0));
+                        UEVars_val.insert(op0);
                     }
                 }
 
 //---------------- Binary operations (+, -, *, /)
                 if(inst.isBinaryOp()){
-                    errs() << "\tBinary op: " << inst << '\n';
                     auto op0 = dyn_cast<User>(inst.getOperand(0));
                     auto op1 = dyn_cast<User>(inst.getOperand(1));
 
@@ -116,15 +105,13 @@ namespace {
                     }
 
                     // Determine the variables the upwards exposed variables
-                    if(VarKilled.find(l) == VarKilled.end()){
+                    if(VarKilled_val.find(l1) == VarKilled_val.end()){
                         UEVars.insert(l);
                         UEVars_val.insert(l1);
-                        errs() << "\t  UEVars: " << l1->getName() << '\n';
                     }
-                    if(VarKilled.find(r) == VarKilled.end()){
+                    if(VarKilled_val.find(r1) == VarKilled_val.end()){
                         UEVars.insert(r);
                         UEVars_val.insert(r1);
-                        errs() << "\t  UEVars: " << r1->getName() << '\n';
                     }
                     isFromBin = true;
 
@@ -135,26 +122,25 @@ namespace {
                 m_VK[block] = VarKilled;
                 m_UE_val[block] = UEVars_val;
                 m_VK_val[block] = VarKilled_val;
-
             }
+
             already_UE_l = false;
             already_UE_r = false;
         }
 
+        // STEP 2: Iterative algorithm. Calculates the LiveOut set of variables by traversing the CFG in a bottom
+        // up traversal
         bool cont = true;
         map<string, set<string>> m_LO;
         map<string, set<llvm::Value*>> m_LO_val;
-        errs() << "-------------Bottom up---------------\n\n";
 
         while(cont){
-            errs() << "iteration\n";
             cont = false;
 
             for(auto& basic_block: reverse(F)){
                 string block = formatv("{0}", &basic_block);
                 set<string> prev_LO;
                 set<llvm::Value*> prev_LO_val;
-                errs() << "\tblock: " << block << "\n";
 
                 map<string, set<string>>::iterator f = m_LO.find(block);
                 map<string, set<llvm::Value*>>::iterator f1 = m_LO_val.find(block);
@@ -189,18 +175,7 @@ namespace {
                     std::set_union(temp2.begin(), temp2.end(), new_lo_val.begin(), new_lo_val.end(), std::inserter(new_lo_val, new_lo_val.end()));
                 }
 
-                errs() << "\t  new_lo: ";
-                for(auto a: new_lo_val)
-                    errs() << a->getName() << " ";
-                errs() << '\n';
-
-                errs() << "\t  prev_LO: ";
-                for(auto a: prev_LO_val)
-                    errs() << a->getName() << " ";
-                errs() << '\n';
-
-
-                if (new_lo != prev_LO) { 
+                if (new_lo_val != prev_LO_val) { 
                     m_LO[block] = new_lo;
                     m_LO_val[block] = new_lo_val;
                     cont = true;
@@ -209,6 +184,7 @@ namespace {
             }
         }
 
+        // Output UE vars, killed vars, and live out set per block
         for(auto& basic_block: F){
             string block_name = formatv("{0}",basic_block.getName());
             errs() << "-------" << block_name << "--------\n";
